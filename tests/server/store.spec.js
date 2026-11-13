@@ -37,7 +37,10 @@ describe('createPostStore', () => {
     expect(post).toEqual({
       id: 'fixed-id',
       text: '  原样保存，不做校验  ',
-      createdAt: 1731000000000
+      createdAt: 1731000000000,
+      likes: 0,
+      liked: false,
+      favorited: false
     })
     expect(store.size).toBe(1)
     expect(store.list()).toEqual([post])
@@ -149,6 +152,115 @@ describe('createPostStore', () => {
     created.text = '被篡改'
 
     expect(store.list()[0].text).toBe('原始内容')
+  })
+
+  it('新建内容默认未被点赞、未收藏且点赞数为 0', () => {
+    const store = createDeterministicStore()
+    const post = store.create('默认状态')
+
+    expect(post.likes).toBe(0)
+    expect(post.liked).toBe(false)
+    expect(post.favorited).toBe(false)
+    expect(store.get(post.id)).toEqual(post)
+  })
+
+  it('点赞让 likes 递增，取消点赞后归零', () => {
+    const store = createDeterministicStore()
+    const { id, likes } = store.create('可以被点赞')
+
+    expect(likes).toBe(0)
+
+    const liked = store.setLiked(id, true)
+
+    expect(liked.liked).toBe(true)
+    expect(liked.likes).toBe(1)
+
+    const unliked = store.setLiked(id, false)
+
+    expect(unliked.liked).toBe(false)
+    expect(unliked.likes).toBe(0)
+  })
+
+  it('重复点赞幂等，likes 不会叠加', () => {
+    const store = createDeterministicStore()
+    const { id } = store.create('重复点赞')
+
+    store.setLiked(id, true)
+    store.setLiked(id, true)
+
+    expect(store.setLiked(id, true).likes).toBe(1)
+  })
+
+  it('取消未点赞的内容不会让 likes 变成负数', () => {
+    const store = createDeterministicStore()
+    const { id } = store.create('从未被点赞')
+
+    expect(store.setLiked(id, false).likes).toBe(0)
+    expect(store.setLiked(id, false).likes).toBe(0)
+  })
+
+  it('收藏开关独立于点赞', () => {
+    const store = createDeterministicStore()
+    const { id } = store.create('可以被收藏')
+
+    const favorited = store.setFavorited(id, true)
+
+    expect(favorited.favorited).toBe(true)
+    expect(favorited.liked).toBe(false)
+    expect(favorited.likes).toBe(0)
+
+    expect(store.setFavorited(id, true).favorited).toBe(true)
+
+    const cleared = store.setFavorited(id, false)
+
+    expect(cleared.favorited).toBe(false)
+    expect(cleared.likes).toBe(0)
+  })
+
+  it('setLiked / setFavorited 对未知 id 返回 undefined 且不改变数据', () => {
+    const store = createDeterministicStore()
+    store.create('唯一一条')
+
+    expect(store.setLiked('missing-id', true)).toBeUndefined()
+    expect(store.setFavorited('missing-id', true)).toBeUndefined()
+    expect(store.size).toBe(1)
+    expect(store.list()[0].liked).toBe(false)
+    expect(store.list()[0].favorited).toBe(false)
+  })
+
+  it('内容被删除后再操作返回 undefined', () => {
+    const store = createDeterministicStore()
+    const { id } = store.create('待删除')
+
+    store.remove(id)
+
+    expect(store.setLiked(id, true)).toBeUndefined()
+    expect(store.setFavorited(id, true)).toBeUndefined()
+  })
+
+  it('setLiked 返回副本，外部修改不影响内部状态', () => {
+    const store = createDeterministicStore()
+    const { id } = store.create('副本隔离')
+
+    const liked = store.setLiked(id, true)
+    liked.likes = 999
+    liked.liked = false
+
+    const current = store.get(id)
+
+    expect(current.likes).toBe(1)
+    expect(current.liked).toBe(true)
+  })
+
+  it('切换点赞后列表顺序与正文保持不变', () => {
+    const store = createDeterministicStore()
+    store.create('第一条')
+    const second = store.create('第二条')
+
+    store.setLiked(second.id, true)
+
+    expect(store.list().map((post) => post.text)).toEqual(['第二条', '第一条'])
+    expect(store.list()[0].liked).toBe(true)
   })
 
   it('clear 清空全部内容', () => {

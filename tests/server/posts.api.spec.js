@@ -30,6 +30,13 @@ async function listTexts() {
   return payload.posts.map((post) => post.text)
 }
 
+/** 点赞 / 收藏：action 为 like 或 favorite，method 为 POST 或 DELETE。 */
+async function toggle(id, action, method) {
+  const response = await send(`/api/posts/${id}/${action}`, { method })
+
+  return { response, payload: await response.json() }
+}
+
 beforeEach(() => {
   app = createApp()
 })
@@ -229,6 +236,146 @@ describe('GET /api/posts/:id', () => {
 
     expect(response.status).toBe(404)
     expect((await response.json()).error.code).toBe('POST_NOT_FOUND')
+  })
+})
+
+describe('POST /api/posts/:id/like', () => {
+  it('点赞成功返回 200 与最新的 Post', async () => {
+    const { payload: created } = await publish('值得点赞')
+    const { response, payload } = await toggle(created.post.id, 'like', 'POST')
+
+    expect(response.status).toBe(200)
+    expect(payload.post.liked).toBe(true)
+    expect(payload.post.likes).toBe(1)
+    expect(payload.post.text).toBe('值得点赞')
+    expect(payload.post.favorited).toBe(false)
+  })
+
+  it('重复点赞幂等，likes 恒为 1', async () => {
+    const { payload: created } = await publish('重复点赞')
+    const path = created.post.id
+
+    await toggle(path, 'like', 'POST')
+    const { response, payload } = await toggle(path, 'like', 'POST')
+
+    expect(response.status).toBe(200)
+    expect(payload.post.likes).toBe(1)
+  })
+
+  it('取消点赞返回 200 且 likes 归零', async () => {
+    const { payload: created } = await publish('先赞后取消')
+    const path = created.post.id
+
+    await toggle(path, 'like', 'POST')
+    const { response, payload } = await toggle(path, 'like', 'DELETE')
+
+    expect(response.status).toBe(200)
+    expect(payload.post.liked).toBe(false)
+    expect(payload.post.likes).toBe(0)
+  })
+
+  it('重复取消点赞幂等，likes 不会变成负数', async () => {
+    const { payload: created } = await publish('没被点过赞')
+    const path = created.post.id
+
+    const first = await toggle(path, 'like', 'DELETE')
+    const second = await toggle(path, 'like', 'DELETE')
+
+    expect(first.payload.post.likes).toBe(0)
+    expect(second.response.status).toBe(200)
+    expect(second.payload.post.likes).toBe(0)
+  })
+
+  it('内容不存在时返回 404 POST_NOT_FOUND', async () => {
+    const posted = await toggle('missing-id', 'like', 'POST')
+    const deleted = await toggle('missing-id', 'like', 'DELETE')
+
+    expect(posted.response.status).toBe(404)
+    expect(posted.payload.error.code).toBe('POST_NOT_FOUND')
+    expect(deleted.response.status).toBe(404)
+    expect(deleted.payload.error.code).toBe('POST_NOT_FOUND')
+  })
+
+  it('点赞后单条与列表接口都反映最新状态', async () => {
+    const { payload: created } = await publish('状态同步')
+    const id = created.post.id
+
+    await toggle(id, 'like', 'POST')
+
+    const single = await send(`/api/posts/${id}`)
+    const listed = await send('/api/posts')
+
+    expect((await single.json()).post.liked).toBe(true)
+    expect((await listed.json()).posts[0].likes).toBe(1)
+  })
+
+  it('点赞不改变正文、createdAt 与列表顺序', async () => {
+    const { payload: first } = await publish('第一条')
+    const { payload: second } = await publish('第二条')
+
+    await toggle(first.post.id, 'like', 'POST')
+
+    const post = (await (await send(`/api/posts/${first.post.id}`)).json()).post
+
+    expect(post.createdAt).toBe(first.post.createdAt)
+    expect(await listTexts()).toEqual(['第二条', '第一条'])
+  })
+})
+
+describe('POST /api/posts/:id/favorite', () => {
+  it('收藏成功返回 200 且 favorited 为 true', async () => {
+    const { payload: created } = await publish('值得收藏')
+    const { response, payload } = await toggle(created.post.id, 'favorite', 'POST')
+
+    expect(response.status).toBe(200)
+    expect(payload.post.favorited).toBe(true)
+    expect(payload.post.liked).toBe(false)
+    expect(payload.post.likes).toBe(0)
+  })
+
+  it('重复收藏幂等', async () => {
+    const { payload: created } = await publish('重复收藏')
+    const id = created.post.id
+
+    await toggle(id, 'favorite', 'POST')
+    const { payload } = await toggle(id, 'favorite', 'POST')
+
+    expect(payload.post.favorited).toBe(true)
+  })
+
+  it('取消收藏返回 200 且 favorited 为 false，可重复调用', async () => {
+    const { payload: created } = await publish('取消收藏')
+    const id = created.post.id
+
+    await toggle(id, 'favorite', 'POST')
+
+    expect((await toggle(id, 'favorite', 'DELETE')).payload.post.favorited).toBe(false)
+    expect((await toggle(id, 'favorite', 'DELETE')).payload.post.favorited).toBe(false)
+  })
+
+  it('内容不存在时返回 404 POST_NOT_FOUND', async () => {
+    expect((await toggle('missing-id', 'favorite', 'POST')).response.status).toBe(404)
+    expect((await toggle('missing-id', 'favorite', 'DELETE')).response.status).toBe(404)
+  })
+})
+
+describe('Post 字段完整性', () => {
+  it('新发布的内容带齐点赞与收藏字段', async () => {
+    const { payload } = await publish('字段检查')
+
+    expect(payload.post).toMatchObject({ likes: 0, liked: false, favorited: false })
+  })
+
+  it('列表与单条接口均返回完整字段', async () => {
+    const { payload: created } = await publish('字段检查')
+    const listed = (await (await send('/api/posts')).json()).posts[0]
+    const single = (await (await send(`/api/posts/${created.post.id}`)).json()).post
+
+    for (const post of [listed, single]) {
+      expect(post.likes).toBe(0)
+      expect(post.liked).toBe(false)
+      expect(post.favorited).toBe(false)
+    }
   })
 })
 

@@ -111,6 +111,37 @@ export function createApp({ store = createPostStore() } = {}) {
     return context.body(null, 204)
   })
 
+  /**
+   * 点赞 / 收藏的幂等切换：POST 置为 true，DELETE 置为 false。
+   * 用闭包包一层而不是直接传 store 方法，避免依赖 this 绑定。
+   */
+  function toggleFlag(applyFlag) {
+    return (context) => {
+      const post = applyFlag(context.req.param('id'))
+
+      if (!post) return fail(context, 404, 'POST_NOT_FOUND')
+
+      return context.json({ post })
+    }
+  }
+
+  app.post(
+    '/api/posts/:id/like',
+    toggleFlag((id) => store.setLiked(id, true))
+  )
+  app.delete(
+    '/api/posts/:id/like',
+    toggleFlag((id) => store.setLiked(id, false))
+  )
+  app.post(
+    '/api/posts/:id/favorite',
+    toggleFlag((id) => store.setFavorited(id, true))
+  )
+  app.delete(
+    '/api/posts/:id/favorite',
+    toggleFlag((id) => store.setFavorited(id, false))
+  )
+
   app.notFound((context) => fail(context, 404, 'NOT_FOUND'))
 
   // 兜底：任何未预期的异常都返回统一的 JSON 错误体，且不向外泄露堆栈或内部信息

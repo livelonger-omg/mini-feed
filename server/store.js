@@ -37,11 +37,52 @@ export function createPostStore({
   }
 
   function create(text) {
-    const post = { id: createId(), text, createdAt: now() }
+    const post = {
+      id: createId(),
+      text,
+      createdAt: now(),
+      likes: 0,
+      liked: false,
+      favorited: false
+    }
 
     posts = [post, ...posts].sort(compareDesc).slice(0, limit)
 
     return { ...post }
+  }
+
+  /**
+   * 切换单个布尔标记，返回更新后的副本；id 不存在时返回 undefined。
+   * 已是目标状态时直接返回副本（幂等），likes 不会重复累加。
+   * 只有 liked 会驱动 likes 计数，且结果永不为负。
+   * 原位替换，不打乱既有的「新 → 旧」顺序。
+   */
+  function setFlag(id, key, value) {
+    const index = posts.findIndex((post) => post.id === id)
+
+    if (index === -1) return undefined
+
+    const current = posts[index]
+
+    if (current[key] === value) return { ...current }
+
+    const next = { ...current, [key]: value }
+
+    if (key === 'liked') {
+      next.likes = Math.max(0, current.likes + (value ? 1 : -1))
+    }
+
+    posts = posts.map((post, i) => (i === index ? next : post))
+
+    return { ...next }
+  }
+
+  function setLiked(id, liked) {
+    return setFlag(id, 'liked', Boolean(liked))
+  }
+
+  function setFavorited(id, favorited) {
+    return setFlag(id, 'favorited', Boolean(favorited))
   }
 
   function remove(id) {
@@ -61,6 +102,8 @@ export function createPostStore({
     list,
     get,
     create,
+    setLiked,
+    setFavorited,
     remove,
     clear,
     get size() {
