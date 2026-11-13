@@ -70,4 +70,51 @@ describe('PostComposer', () => {
 
     expect(wrapper.get('[data-testid="char-count"]').classes()).toContain('is-warning')
   })
+
+  it('提交中禁用发布按钮并展示进行中文案', async () => {
+    const wrapper = mount(PostComposer, { props: { submitting: true } })
+
+    await wrapper.get('[data-testid="post-input"]').setValue('提交中的内容')
+
+    const button = wrapper.get('[data-testid="publish-btn"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.text()).toBe('发布中…')
+  })
+
+  it('提交中按 Ctrl + Enter 不会重复触发', async () => {
+    const wrapper = mount(PostComposer, { props: { submitting: true } })
+    const input = wrapper.get('[data-testid="post-input"]')
+
+    await input.setValue('提交中的内容')
+    await input.trigger('keydown', { key: 'Enter', ctrlKey: true })
+
+    expect(wrapper.emitted('submit')).toBeUndefined()
+  })
+
+  it('restoreDraft 不会覆盖用户已经重新输入的内容', async () => {
+    const wrapper = mountComposer()
+
+    await wrapper.get('[data-testid="post-input"]').setValue('失败的草稿')
+    await wrapper.get('[data-testid="publish-btn"]').trigger('click')
+    await wrapper.get('[data-testid="post-input"]').setValue('用户重新输入的内容')
+
+    wrapper.vm.restoreDraft('失败的草稿')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-testid="post-input"]').element.value).toBe(
+      '用户重新输入的内容'
+    )
+  })
+
+  it('restoreDraft 可以把失败的草稿放回输入框', async () => {
+    const wrapper = mountComposer()
+
+    await wrapper.get('[data-testid="post-input"]').setValue('失败的草稿')
+    await wrapper.get('[data-testid="publish-btn"]').trigger('click')
+    wrapper.vm.restoreDraft('失败的草稿')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-testid="post-input"]').element.value).toBe('失败的草稿')
+    expect(wrapper.get('[data-testid="char-count"]').text()).toBe('5 / 280')
+  })
 })

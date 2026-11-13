@@ -36,6 +36,18 @@ describe('PostItem', () => {
     expect(wrapper.emitted('delete')[0]).toEqual(['post-1'])
   })
 
+  it('删除进行中时禁用删除按钮，避免重复点击', async () => {
+    const wrapper = mount(PostItem, {
+      props: { post: { id: 'post-1', text: '删除中', createdAt: NOW }, now: NOW, deleting: true }
+    })
+
+    const button = wrapper.get('[data-testid="delete-btn"]')
+    expect(button.attributes('disabled')).toBeDefined()
+
+    await button.trigger('click')
+    expect(wrapper.emitted('delete')).toBeUndefined()
+  })
+
   it('头像取 id 生成的渐变背景', () => {
     const wrapper = mountItem()
     const avatar = wrapper.get('[data-testid="post-avatar"]').element
