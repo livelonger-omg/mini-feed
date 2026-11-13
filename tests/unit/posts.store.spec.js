@@ -324,3 +324,210 @@ describe('posts store', () => {
     expect(store.error).toBe('')
   })
 })
+
+describe('posts store 点赞与收藏', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('点赞先乐观更新，再用服务端结果覆盖', async () => {
+    vi.spyOn(postsApi, 'list').mockResolvedValue([
+      makePost('a', '可以点赞', 1)
+    ])
+    let release
+    const likeSpy = vi.spyOn(postsApi, 'like').mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve
+      })
+    )
+
+    const store = usePostsStore()
+    await store.load()
+
+    const pending = store.toggleLike('a')
+
+    // 请求还没回来，界面已经变了
+    expect(store.posts[0].liked).toBe(true)
+    expect(store.posts[0].likes).toBe(1)
+    expect(store.isLiking('a')).toBe(true)
+    expect(likeSpy).toHaveBeenCalledWith('a')
+
+    release({ ...makePost('a', '可以点赞', 1), likes: 7, liked: true })
+    await pending
+
+    expect(store.posts[0].likes).toBe(7)
+    expect(store.posts[0].liked).toBe(true)
+    expect(store.isLiking('a')).toBe(false)
+  })
+
+  it('取消点赞调用 unlike 并把计数减回去', async () => {
+    vi.spyOn(postsApi, 'list').mockResolvedValue([
+      { ...makePost('a', '已点赞', 1), liked: true, likes: 1 }
+    ])
+    const unlikeSpy = vi
+      .spyOn(postsApi, 'unlike')
+      .mockResolvedValue({ ...makePost('a', '已点赞', 1), liked: false, likes: 0 })
+
+    const store = usePostsStore()
+    await store.load()
+
+    expect(await store.toggleLike('a')).toBe(true)
+    expect(unlikeSpy).toHaveBeenCalledWith('a')
+    expect(store.posts[0].liked).toBe(false)
+    expect(store.posts[0].likes).toBe(0)
+  })
+
+  it('点赞失败时回滚并记录错误来源', async () => {
+    vi.spyOn(postsApi, 'list').mockResolvedValue([
+      { ...makePost('a', '点赞会失败', 1), likes: 2, liked: false }
+    ])
+    vi.spyOn(postsApi, 'like').mockRejectedValue(new ApiError('服务暂时不可用'))
+
+    const store = usePostsStore()
+    await store.load()
+
+    expect(await store.toggleLike('a')).toBe(false)
+    expect(store.posts[0].liked).toBe(false)
+    expect(store.posts[0].likes).toBe(2)
+    expect(store.error).toBe('服务暂时不可用')
+    expect(store.errorSource).toBe('like')
+    expect(store.isLiking('a')).toBe(false)
+  })
+
+  it('点赞进行中重复点击只发起一次请求', async () => {
+    vi.spyOn(postsApi, 'list').mockResolvedValue([makePost('a', '重复点赞', 1)])
+    let release
+    const likeSpy = vi.spyOn(postsApi, 'like').mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve
+      })
+    )
+
+    const store = usePostsStore()
+    await store.load()
+
+    const first = store.toggleLike('a')
+    const second = store.toggleLike('a')
+
+    expect(await second).toBe(false)
+
+    release({ ...makePost('a', '重复点赞', 1), likes: 1, liked: true })
+    await first
+
+    expect(likeSpy).toHaveBeenCalledTimes(1)
+    expect(store.posts[0].likes).toBe(1)
+  })
+
+  it('取消点赞时计数不会变成负数', async () => {
+    vi.spyOn(postsApi, 'list').mockResolvedValue([
+      { ...makePost('a', '脏数据', 1), liked: true, likes: 0 }
+    ])
+    vi.spyOn(postsApi, 'unlike').mockResolvedValue({
+      ...makePost('a', '脏数据', 1),
+      liked: false,
+      likes: 0
+    })
+
+    const store = usePostsStore()
+    await store.load()
+
+    await store.toggleLike('a')
+
+    expect(store.posts[0].likes).toBe(0)
+  })
+
+  it('收藏切换后 favoritePosts 与 favoriteCount 同步', async () => {
+    vi.spyOn(postsApi, 'list').mockResolvedValue([
+      makePost('a', '第一条', 2),
+      makePost('b', '第二条', 1)
+    ])
+    vi.spyOn(postsApi, 'favorite').mockResolvedValue({
+      ...makePost('a', '第一条', 2),
+      favorited: true
+    })
+    vi.spyOn(postsApi, 'unfavorite').mockResolvedValue({
+      ...makePost('a', '第一条', 2),
+      favorited: false
+    })
+
+    const store = usePostsStore()
+    await store.load()
+
+    expect(store.favoriteCount).toBe(0)
+
+    await store.toggleFavorite('a')
+
+    expect(store.posts[0].favorited).toBe(true)
+    expect(store.posts[0].liked).toBe(false)
+    expect(store.favoriteCount).toBe(1)
+    expect(store.favoritePosts.map((post) => post.id)).toEqual(['a'])
+
+    await store.toggleFavorite('a')
+
+    expect(store.favoriteCount).toBe(0)
+    expect(store.favoritePosts).toEqual([])
+  })
+
+  it('收藏失败时回滚并记录错误来源', async () => {
+    vi.spyOn(postsApi, 'list').mockResolvedValue([makePost('a', '收藏会失败', 1)])
+    vi.spyOn(postsApi, 'favorite').mockRejectedValue(new ApiError('收藏失败了'))
+
+    const store = usePostsStore()
+    await store.load()
+
+    expect(await store.toggleFavorite('a')).toBe(false)
+    expect(store.posts[0].favorited).toBe(false)
+    expect(store.error).toBe('收藏失败了')
+    expect(store.errorSource).toBe('favorite')
+  })
+
+  it('对不存在的内容不做任何请求', async () => {
+    const likeSpy = vi.spyOn(postsApi, 'like')
+    const favoriteSpy = vi.spyOn(postsApi, 'favorite')
+
+    const store = usePostsStore()
+
+    expect(await store.toggleLike('missing')).toBe(false)
+    expect(await store.toggleFavorite('missing')).toBe(false)
+    expect(likeSpy).not.toHaveBeenCalled()
+    expect(favoriteSpy).not.toHaveBeenCalled()
+  })
+
+  it('点赞不会改变列表顺序', async () => {
+    vi.spyOn(postsApi, 'list').mockResolvedValue([
+      makePost('a', '新的', 2),
+      makePost('b', '旧的', 1)
+    ])
+    vi.spyOn(postsApi, 'like').mockResolvedValue({
+      ...makePost('b', '旧的', 1),
+      liked: true,
+      likes: 1
+    })
+
+    const store = usePostsStore()
+    await store.load()
+
+    await store.toggleLike('b')
+
+    expect(store.posts.map((post) => post.id)).toEqual(['a', 'b'])
+  })
+
+  it('点赞成功后清空先前的错误提示', async () => {
+    vi.spyOn(postsApi, 'list').mockRejectedValueOnce(new ApiError('加载失败'))
+    vi.spyOn(postsApi, 'list').mockResolvedValue([makePost('a', '内容', 1)])
+    vi.spyOn(postsApi, 'like').mockResolvedValue({
+      ...makePost('a', '内容', 1),
+      liked: true,
+      likes: 1
+    })
+
+    const store = usePostsStore()
+    await store.load()
+    expect(store.error).toBe('加载失败')
+
+    await store.load()
+    await store.toggleLike('a')
+
+    expect(store.error).toBe('')
+  })
+})

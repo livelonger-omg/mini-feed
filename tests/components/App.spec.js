@@ -24,6 +24,18 @@ beforeEach(() => {
     createdAt: 1
   })
   vi.spyOn(postsApi, 'remove').mockResolvedValue(undefined)
+  vi.spyOn(postsApi, 'like').mockImplementation((id) =>
+    Promise.resolve({ id, text: '内容', createdAt: 1, likes: 1, liked: true, favorited: false })
+  )
+  vi.spyOn(postsApi, 'unlike').mockImplementation((id) =>
+    Promise.resolve({ id, text: '内容', createdAt: 1, likes: 0, liked: false, favorited: false })
+  )
+  vi.spyOn(postsApi, 'favorite').mockImplementation((id) =>
+    Promise.resolve({ id, text: '内容', createdAt: 1, likes: 0, liked: false, favorited: true })
+  )
+  vi.spyOn(postsApi, 'unfavorite').mockImplementation((id) =>
+    Promise.resolve({ id, text: '内容', createdAt: 1, likes: 0, liked: false, favorited: false })
+  )
 })
 
 describe('App 初次加载', () => {
@@ -214,4 +226,135 @@ describe('App 错误处理', () => {
     expect(wrapper.get('[data-testid="error-banner"]').text()).toContain('第二次连接失败')
   })
 
+})
+
+describe('App 点赞与收藏', () => {
+  it('点击点赞按钮调用接口并展示最新计数', async () => {
+    postsApi.list.mockResolvedValue([{ id: 'a', text: '可以点赞', createdAt: 1 }])
+    postsApi.like.mockResolvedValue({
+      id: 'a',
+      text: '可以点赞',
+      createdAt: 1,
+      likes: 3,
+      liked: true,
+      favorited: false
+    })
+
+    const wrapper = mountApp()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="like-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(postsApi.like).toHaveBeenCalledWith('a')
+    expect(wrapper.get('[data-testid="like-count"]').text()).toBe('3')
+    expect(wrapper.get('[data-testid="like-btn"]').attributes('aria-pressed')).toBe(
+      'true'
+    )
+  })
+
+  it('已点赞时再次点击调用取消点赞接口', async () => {
+    postsApi.list.mockResolvedValue([
+      { id: 'a', text: '已点赞', createdAt: 1, likes: 2, liked: true, favorited: false }
+    ])
+    postsApi.unlike.mockResolvedValue({
+      id: 'a',
+      text: '已点赞',
+      createdAt: 1,
+      likes: 1,
+      liked: false,
+      favorited: false
+    })
+
+    const wrapper = mountApp()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="like-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(postsApi.unlike).toHaveBeenCalledWith('a')
+    expect(wrapper.get('[data-testid="like-count"]').text()).toBe('1')
+    expect(wrapper.get('[data-testid="like-btn"]').attributes('aria-pressed')).toBe(
+      'false'
+    )
+  })
+
+  it('收藏后「我的收藏」只展示已收藏内容', async () => {
+    postsApi.list.mockResolvedValue([
+      { id: 'a', text: '第一条', createdAt: 2 },
+      { id: 'b', text: '第二条', createdAt: 1 }
+    ])
+    postsApi.favorite.mockResolvedValue({
+      id: 'a',
+      text: '第一条',
+      createdAt: 2,
+      likes: 0,
+      liked: false,
+      favorited: true
+    })
+
+    const wrapper = mountApp()
+    await flushPromises()
+
+    await wrapper.findAll('[data-testid="favorite-btn"]')[0].trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="filter-favorites"]').trigger('click')
+
+    const texts = wrapper
+      .findAll('[data-testid="post-text"]')
+      .map((node) => node.text())
+
+    expect(texts).toEqual(['第一条'])
+    expect(wrapper.get('[data-testid="filter-favorites"]').attributes('aria-pressed')).toBe(
+      'true'
+    )
+    expect(wrapper.get('[data-testid="stream-count"]').text()).toBe('1 条收藏')
+  })
+
+  it('没有收藏内容时给出空态引导', async () => {
+    postsApi.list.mockResolvedValue([{ id: 'a', text: '未收藏', createdAt: 1 }])
+
+    const wrapper = mountApp()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="filter-favorites"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="favorites-empty"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="post-item"]')).toHaveLength(0)
+  })
+
+  it('切回「全部」恢复完整列表', async () => {
+    postsApi.list.mockResolvedValue([
+      { id: 'a', text: '第一条', createdAt: 2 },
+      { id: 'b', text: '第二条', createdAt: 1 }
+    ])
+
+    const wrapper = mountApp()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="filter-favorites"]').trigger('click')
+    await wrapper.get('[data-testid="filter-all"]').trigger('click')
+
+    expect(wrapper.findAll('[data-testid="post-item"]')).toHaveLength(2)
+    expect(wrapper.get('[data-testid="stream-count"]').text()).toBe('2 条')
+  })
+
+  it('收藏失败时回滚激活态并提示错误', async () => {
+    postsApi.list.mockResolvedValue([{ id: 'a', text: '收藏会失败', createdAt: 1 }])
+    postsApi.favorite.mockRejectedValue(new ApiError('收藏失败了，请稍后重试'))
+
+    const wrapper = mountApp()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="favorite-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="error-banner"]').text()).toContain(
+      '收藏失败了，请稍后重试'
+    )
+    expect(
+      wrapper.get('[data-testid="favorite-btn"]').attributes('aria-pressed')
+    ).toBe('false')
+  })
 })

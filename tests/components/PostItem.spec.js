@@ -55,3 +55,88 @@ describe('PostItem', () => {
     expect(avatar.style.background).toContain('gradient')
   })
 })
+
+describe('PostItem 点赞与收藏', () => {
+  it('缺少点赞字段时计数按 0 渲染', () => {
+    const wrapper = mountItem()
+
+    expect(wrapper.get('[data-testid="like-count"]').text()).toBe('0')
+    expect(wrapper.get('[data-testid="like-btn"]').attributes('aria-pressed')).toBe(
+      'false'
+    )
+    expect(
+      wrapper.get('[data-testid="favorite-btn"]').attributes('aria-pressed')
+    ).toBe('false')
+  })
+
+  it('渲染点赞数与激活态', () => {
+    const wrapper = mountItem({ likes: 12, liked: true, favorited: true })
+
+    expect(wrapper.get('[data-testid="like-count"]').text()).toBe('12')
+    expect(wrapper.get('[data-testid="like-btn"]').attributes('aria-pressed')).toBe(
+      'true'
+    )
+    expect(wrapper.get('[data-testid="like-btn"]').classes()).toContain('is-active')
+    expect(
+      wrapper.get('[data-testid="favorite-btn"]').attributes('aria-pressed')
+    ).toBe('true')
+    expect(wrapper.get('[data-testid="favorite-btn"]').classes()).toContain('is-active')
+  })
+
+  it('非法计数回退为 0，不渲染 NaN 或负数', () => {
+    const wrapper = mountItem({ likes: -3 })
+
+    expect(wrapper.get('[data-testid="like-count"]').text()).toBe('0')
+
+    const nanWrapper = mountItem({ likes: 'many' })
+
+    expect(nanWrapper.get('[data-testid="like-count"]').text()).toBe('0')
+  })
+
+  it('点击点赞按钮抛出 like 事件并携带 id', async () => {
+    const wrapper = mountItem()
+
+    await wrapper.get('[data-testid="like-btn"]').trigger('click')
+
+    expect(wrapper.emitted('like')[0]).toEqual(['post-1'])
+  })
+
+  it('点击收藏按钮抛出 favorite 事件并携带 id', async () => {
+    const wrapper = mountItem()
+
+    await wrapper.get('[data-testid="favorite-btn"]').trigger('click')
+
+    expect(wrapper.emitted('favorite')[0]).toEqual(['post-1'])
+  })
+
+  it('请求进行中时禁用按钮且不重复抛事件', async () => {
+    const wrapper = mount(PostItem, {
+      props: {
+        post: { id: 'post-1', text: '处理中', createdAt: NOW },
+        now: NOW,
+        liking: true,
+        favoriting: true
+      }
+    })
+
+    const likeBtn = wrapper.get('[data-testid="like-btn"]')
+    const favoriteBtn = wrapper.get('[data-testid="favorite-btn"]')
+
+    expect(likeBtn.attributes('disabled')).toBeDefined()
+    expect(favoriteBtn.attributes('disabled')).toBeDefined()
+
+    await likeBtn.trigger('click')
+    await favoriteBtn.trigger('click')
+
+    expect(wrapper.emitted('like')).toBeUndefined()
+    expect(wrapper.emitted('favorite')).toBeUndefined()
+  })
+
+  it('点赞不会影响删除按钮行为', async () => {
+    const wrapper = mountItem()
+
+    await wrapper.get('[data-testid="like-btn"]').trigger('click')
+
+    expect(wrapper.emitted('delete')).toBeUndefined()
+  })
+})
