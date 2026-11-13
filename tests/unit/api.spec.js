@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { API_BASE_URL, ApiError, createPostsApi } from '@/services/api.js'
+import { API_BASE_URL, ApiError, createPostsApi, normalizePost } from '@/services/api.js'
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -30,7 +30,9 @@ describe('createPostsApi', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(`${API_BASE_URL}/posts`)
     expect(init.method).toBe('GET')
-    expect(posts).toEqual([{ id: 'a', text: '你好', createdAt: 1 }])
+    expect(posts).toEqual([
+      { id: 'a', text: '你好', createdAt: 1, likes: 0, liked: false, favorited: false }
+    ])
   })
 
   it('允许注入自定义 baseUrl', async () => {
@@ -59,7 +61,14 @@ describe('createPostsApi', () => {
     expect(init.method).toBe('POST')
     expect(init.headers['Content-Type']).toBe('application/json')
     expect(JSON.parse(init.body)).toEqual({ text: '新内容' })
-    expect(post).toEqual({ id: 'new', text: '新内容', createdAt: 2 })
+    expect(post).toEqual({
+      id: 'new',
+      text: '新内容',
+      createdAt: 2,
+      likes: 0,
+      liked: false,
+      favorited: false
+    })
   })
 
   it('删除内容时对 id 做 URL 编码，204 不解析响应体', async () => {
@@ -157,7 +166,118 @@ describe('createPostsApi', () => {
     )
 
     expect(await createPostsApi().list()).toEqual([
-      { id: 'a', text: '合法', createdAt: 1 }
+      { id: 'a', text: '合法', createdAt: 1, likes: 0, liked: false, favorited: false }
     ])
+  })
+})
+
+describe('normalizePost', () => {
+  it('补齐缺失的点赞与收藏字段', () => {
+    expect(normalizePost({ id: 'a', text: '正文', createdAt: 1 })).toEqual({
+      id: 'a',
+      text: '正文',
+      createdAt: 1,
+      likes: 0,
+      liked: false,
+      favorited: false
+    })
+  })
+
+  it('负数与非数字的计数按 0 处理，布尔字段严格转换', () => {
+    const post = normalizePost({
+      id: 'a',
+      text: '脏数据',
+      createdAt: 1,
+      likes: -5,
+      liked: 'yes',
+      favorited: 1
+    })
+
+    expect(post.likes).toBe(0)
+    expect(post.liked).toBe(false)
+    expect(post.favorited).toBe(false)
+  })
+
+  it('小数计数向下取整', () => {
+    expect(normalizePost({ id: 'a', likes: 2.7 }).likes).toBe(2)
+  })
+})
+
+describe('createPostsApi 点赞与收藏', () => {
+  it.each([
+    ['like', 'POST'],
+    ['unlike', 'DELETE'],
+    ['favorite', 'POST'],
+    ['unfavorite', 'DELETE']
+  ])('%s 使用 %s 请求并按 /like 或 /favorite 拼路径', async (method, httpMethod) => {
+    const fetchMock = stubFetch(() =>
+      jsonResponse({ post: { id: 'p1', text: '内容', createdAt: 1, likes: 1, liked: true } })
+    )
+
+    const post = await createPostsApi()[method]('p1')
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(init.method).toBe(httpMethod)
+    expect(url).toMatch(/\/posts\/p1\/(like|favorite)$/)
+    expect(post).toEqual({
+      id: 'p1',
+      text: '内容',
+      createdAt: 1,
+      likes: 1,
+      liked: true,
+      favorited: false
+    })
+  })
+
+  it('点赞与收藏分别命中正确的路径', async () => {
+    const fetchMock = stubFetch(() =>
+      jsonResponse({ post: { id: 'p1', text: '内容', createdAt: 1 } })
+    )
+    const api = createPostsApi()
+
+    await api.like('p1')
+    await api.favorite('p1')
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE_URL}/posts/p1/like`)
+    expect(fetchMock.mock.calls[1][0]).toBe(`${API_BASE_URL}/posts/p1/favorite`)
+  })
+
+  it('对 id 做 URL 编码', async () => {
+    const fetchMock = stubFetch(() =>
+      jsonResponse({ post: { id: 'a/b c', text: '内容', createdAt: 1 } })
+    )
+
+    await createPostsApi().favorite('a/b c')
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `${API_BASE_URL}/posts/a%2Fb%20c/favorite`
+    )
+  })
+
+  it('响应缺少 post 字段时抛出 INVALID_RESPONSE', async () => {
+    stubFetch(() => jsonResponse({}))
+
+    const error = await createPostsApi()
+      .like('p1')
+      .catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.code).toBe('INVALID_RESPONSE')
+  })
+
+  it('服务端 404 时抛出携带错误码的 ApiError', async () => {
+    stubFetch(() =>
+      jsonResponse(
+        { error: { code: 'POST_NOT_FOUND', message: '内容不存在或已被删除' } },
+        404
+      )
+    )
+
+    const error = await createPostsApi()
+      .unlike('missing')
+      .catch((caught) => caught)
+
+    expect(error.status).toBe(404)
+    expect(error.code).toBe('POST_NOT_FOUND')
   })
 })

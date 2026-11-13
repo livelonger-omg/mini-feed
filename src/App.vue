@@ -7,8 +7,18 @@ import EmptyState from '@/components/EmptyState.vue'
 
 const store = usePostsStore()
 const composerRef = ref(null)
+// 'all' 展示全部内容，'favorites' 只展示已收藏的内容
+const filter = ref('all')
 
-const countLabel = computed(() => `${store.count} 条`)
+const visiblePosts = computed(() =>
+  filter.value === 'favorites' ? store.favoritePosts : store.posts
+)
+const showFavoritesEmpty = computed(
+  () => filter.value === 'favorites' && store.favoriteCount === 0
+)
+const countLabel = computed(() =>
+  filter.value === 'favorites' ? `${store.favoriteCount} 条收藏` : `${store.count} 条`
+)
 const connectionLabel = computed(() => {
   if (store.errorSource === 'load') return '连接异常'
   if (store.loading) return '连接中'
@@ -37,6 +47,14 @@ async function handleSubmit(text) {
 async function handleDelete(id) {
   if (!window.confirm('确定删除这条内容吗？删除后无法恢复。')) return
   await store.remove(id)
+}
+
+function handleLike(id) {
+  store.toggleLike(id)
+}
+
+function handleFavorite(id) {
+  store.toggleFavorite(id)
 }
 
 function retry() {
@@ -105,7 +123,31 @@ function retry() {
     <section class="stream" aria-labelledby="stream-title">
       <div class="stream__head">
         <h2 id="stream-title" class="stream__title">信息流</h2>
-        <span class="stream__meta" data-testid="stream-count">{{ countLabel }}</span>
+        <div class="stream__side">
+          <div class="filter" role="group" aria-label="筛选内容">
+            <button
+              class="filter__btn"
+              :class="{ 'is-active': filter === 'all' }"
+              type="button"
+              data-testid="filter-all"
+              :aria-pressed="filter === 'all'"
+              @click="filter = 'all'"
+            >
+              全部
+            </button>
+            <button
+              class="filter__btn"
+              :class="{ 'is-active': filter === 'favorites' }"
+              type="button"
+              data-testid="filter-favorites"
+              :aria-pressed="filter === 'favorites'"
+              @click="filter = 'favorites'"
+            >
+              我的收藏
+            </button>
+          </div>
+          <span class="stream__meta" data-testid="stream-count">{{ countLabel }}</span>
+        </div>
       </div>
 
       <p
@@ -119,20 +161,32 @@ function retry() {
       </p>
 
       <TransitionGroup
-        v-else-if="!store.isEmpty"
+        v-else-if="!store.isEmpty && !showFavoritesEmpty"
         id="feed"
         tag="ul"
         name="feed"
         class="feed"
       >
         <PostItem
-          v-for="post in store.posts"
+          v-for="post in visiblePosts"
           :key="post.id"
           :post="post"
           :deleting="store.isDeleting(post.id)"
+          :liking="store.isLiking(post.id)"
+          :favoriting="store.isFavoriting(post.id)"
           @delete="handleDelete"
+          @like="handleLike"
+          @favorite="handleFavorite"
         />
       </TransitionGroup>
+
+      <p
+        v-else-if="showFavoritesEmpty"
+        class="notice"
+        data-testid="favorites-empty"
+      >
+        还没有收藏的内容，点卡片上的星标就能收藏。
+      </p>
 
       <EmptyState v-else-if="!store.error" />
     </section>
@@ -314,6 +368,44 @@ function retry() {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
+}
+
+.stream__side {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.filter {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+}
+
+.filter__btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.filter__btn:hover {
+  color: var(--text-1);
+}
+
+.filter__btn.is-active {
+  color: #0b0f14;
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
 }
 
 .feed {

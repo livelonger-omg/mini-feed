@@ -31,6 +31,30 @@ function isValidPost(post) {
   return Boolean(post) && typeof post.id === 'string' && post.id.length > 0
 }
 
+// 计数兜底：负数 / 非数字 / NaN 一律按 0，避免出现 -1 或 NaN
+function toCount(value) {
+  const num = Number(value)
+
+  if (!Number.isFinite(num) || num < 0) return 0
+
+  return Math.floor(num)
+}
+
+/**
+ * 归一化单条内容：补齐点赞 / 收藏字段，兼容后端旧数据与脏数据，
+ * 保证组件层拿到的结构永远完整。
+ */
+export function normalizePost(post) {
+  return {
+    id: post.id,
+    text: typeof post.text === 'string' ? post.text : '',
+    createdAt: Number.isFinite(post.createdAt) ? post.createdAt : 0,
+    likes: toCount(post.likes),
+    liked: post.liked === true,
+    favorited: post.favorited === true
+  }
+}
+
 export function createPostsApi({ baseUrl = API_BASE_URL, fetchImpl } = {}) {
   const request = async (path, { method = 'GET', body } = {}) => {
     const doFetch = fetchImpl ?? globalThis.fetch.bind(globalThis)
@@ -88,11 +112,30 @@ export function createPostsApi({ baseUrl = API_BASE_URL, fetchImpl } = {}) {
     return payload
   }
 
+  /**
+   * 点赞 / 收藏共用一套切换逻辑：POST 置为 true，DELETE 置为 false。
+   * 服务端是幂等的，因此重复调用不会让计数漂移。
+   */
+  async function toggleFlag(id, action, method) {
+    const payload = await request(`/posts/${encodeURIComponent(id)}/${action}`, { method })
+
+    if (!isValidPost(payload.post)) {
+      throw new ApiError('服务返回的数据不完整，请稍后重试', {
+        status: 200,
+        code: 'INVALID_RESPONSE'
+      })
+    }
+
+    return normalizePost(payload.post)
+  }
+
   return {
     async list() {
       const payload = await request('/posts')
 
-      return Array.isArray(payload.posts) ? payload.posts.filter(isValidPost) : []
+      return Array.isArray(payload.posts)
+        ? payload.posts.filter(isValidPost).map(normalizePost)
+        : []
     },
 
     async create(text) {
@@ -105,11 +148,27 @@ export function createPostsApi({ baseUrl = API_BASE_URL, fetchImpl } = {}) {
         })
       }
 
-      return payload.post
+      return normalizePost(payload.post)
     },
 
     async remove(id) {
       await request(`/posts/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+
+    like(id) {
+      return toggleFlag(id, 'like', 'POST')
+    },
+
+    unlike(id) {
+      return toggleFlag(id, 'like', 'DELETE')
+    },
+
+    favorite(id) {
+      return toggleFlag(id, 'favorite', 'POST')
+    },
+
+    unfavorite(id) {
+      return toggleFlag(id, 'favorite', 'DELETE')
     }
   }
 }
