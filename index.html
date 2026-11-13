@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="碎语 Chatter —— 一个把短文字留在浏览器本地的极简信息流。" />
+  <meta name="theme-color" content="#0B0F14" />
+  <title>碎语 Chatter</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✳</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#feed">跳到信息流</a>
+
+  <header class="topbar">
+    <div class="topbar__inner">
+      <div class="brand">
+        <span class="brand__mark" aria-hidden="true">✳</span>
+        <span class="brand__text">
+          <span class="brand__name">碎语</span>
+          <span class="brand__sub">Chatter</span>
+        </span>
+      </div>
+      <span class="badge" id="storage-badge" title="内容只保存在当前浏览器中，不会上传">
+        <span class="badge__dot" aria-hidden="true"></span>
+        仅存本地
+      </span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="composer" aria-labelledby="composer-title">
+      <h1 class="composer__title" id="composer-title">此刻，想留下点什么？</h1>
+
+      <form class="composer__form" id="composer" autocomplete="off">
+        <label class="sr-only" for="post-input">输入内容</label>
+        <textarea
+          class="composer__input"
+          id="post-input"
+          name="post-input"
+          rows="3"
+          maxlength="280"
+          placeholder="写下一句碎语……"
+          aria-describedby="composer-hint char-count"
+        ></textarea>
+
+        <div class="composer__footer">
+          <p class="composer__hint" id="composer-hint">
+            <kbd>Ctrl</kbd> + <kbd>Enter</kbd> 快速发布
+          </p>
+          <div class="composer__actions">
+            <span class="counter" id="char-count" aria-live="polite">0 / 280</span>
+            <button class="btn btn--primary" id="publish-btn" type="submit" disabled>
+              发布
+            </button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="stream" aria-labelledby="stream-title">
+      <div class="stream__head">
+        <h2 class="stream__title" id="stream-title">信息流</h2>
+        <span class="stream__meta" id="stream-count">0 条</span>
+      </div>
+
+      <ul class="feed" id="feed"></ul>
+
+      <div class="empty" id="empty-state" role="status">
+        <svg class="empty__art" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+          <circle cx="60" cy="60" r="44" stroke="url(#emptyGrad)" stroke-width="1.5" stroke-dasharray="6 8" />
+          <path d="M40 52h40M40 66h26" stroke="#9AA6B5" stroke-width="3" stroke-linecap="round" opacity="0.75" />
+          <circle cx="94" cy="34" r="5" fill="#A97BFF" />
+          <circle cx="26" cy="82" r="3.5" fill="#4EE0B5" />
+          <defs>
+            <linearGradient id="emptyGrad" x1="16" y1="16" x2="104" y2="104" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#5B8CFF" />
+              <stop offset="1" stop-color="#A97BFF" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <p class="empty__title">还没有碎语</p>
+        <p class="empty__text">在上面写点什么都行，它只会留在你这台设备上。</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>数据保存在浏览器 Local Storage，清除浏览器数据即会丢失。</p>
+  </footer>
+
+  <noscript>
+    <p class="noscript">此页面需要启用 JavaScript 才能发布与查看内容。</p>
+  </noscript>
+</body>
+</html>
