@@ -33,7 +33,7 @@
       </defs>
     </svg>
     <p class="empty__title">还没有碎语</p>
-    <p class="empty__text">在上面写点什么都行，它只会留在你这台设备上。</p>
+    <p class="empty__text">在上面写点什么都行，发布后会立即出现在这里。</p>
   </div>
 </template>
 

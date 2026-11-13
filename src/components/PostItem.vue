@@ -15,13 +15,22 @@ const props = defineProps({
   now: {
     type: Number,
     default: () => Date.now()
+  },
+  deleting: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['delete'])
+const emit = defineEmits(['delete'])
 
 const avatarStyle = computed(() => ({ background: gradientFor(props.post.id) }))
 const timeLabel = computed(() => formatRelativeTime(props.post.createdAt, props.now))
+
+function remove() {
+  if (props.deleting) return
+  emit('delete', props.post.id)
+}
 </script>
 
 <template>
@@ -53,9 +62,10 @@ const timeLabel = computed(() => formatRelativeTime(props.post.createdAt, props.
       class="item__delete"
       data-testid="delete-btn"
       type="button"
-      title="删除"
-      aria-label="删除这条内容"
-      @click="$emit('delete', post.id)"
+      :title="deleting ? '删除中…' : '删除'"
+      :aria-label="deleting ? '正在删除这条内容' : '删除这条内容'"
+      :disabled="deleting"
+      @click="remove"
     >
       <svg
         viewBox="0 0 24 24"

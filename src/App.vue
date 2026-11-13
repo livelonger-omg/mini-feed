@@ -1,27 +1,46 @@
 <script setup>
-import { computed } from 'vue'
-import { usePostsStore } from '@/stores/posts.js'
+import { computed, onMounted, ref } from 'vue'
+import { MAX_LENGTH, usePostsStore } from '@/stores/posts.js'
 import PostComposer from '@/components/PostComposer.vue'
 import PostItem from '@/components/PostItem.vue'
 import EmptyState from '@/components/EmptyState.vue'
 
 const store = usePostsStore()
+const composerRef = ref(null)
 
 const countLabel = computed(() => `${store.count} 条`)
-const storageLabel = computed(() => (store.storageAvailable ? '仅存本地' : '内存模式'))
-const storageHint = computed(() =>
-  store.storageAvailable
-    ? '内容只保存在当前浏览器中，不会上传'
-    : '浏览器本地存储不可用，本次内容仅在当前页面有效'
+const connectionLabel = computed(() => {
+  if (store.errorSource === 'load') return '连接异常'
+  if (store.loading) return '连接中'
+  return '服务端存储'
+})
+const connectionHint = computed(() =>
+  store.errorSource === 'load'
+    ? '无法连接后端服务，请检查服务是否已启动'
+    : '内容保存在后端服务的内存中，服务重启后清空'
 )
+// 只有加载失败才能靠「重试」恢复，发布 / 删除失败需要用户重新操作
+const canRetry = computed(() => store.errorSource === 'load')
 
-function handleSubmit(text) {
-  store.add(text)
+onMounted(() => {
+  store.load()
+})
+
+async function handleSubmit(text) {
+  const post = await store.add(text)
+
+  if (!post && store.error) {
+    composerRef.value?.restoreDraft(text)
+  }
 }
 
-function handleDelete(id) {
+async function handleDelete(id) {
   if (!window.confirm('确定删除这条内容吗？删除后无法恢复。')) return
-  store.remove(id)
+  await store.remove(id)
+}
+
+function retry() {
+  store.load()
 }
 </script>
 
@@ -37,12 +56,51 @@ function handleDelete(id) {
           <span class="brand__sub">Chatter</span>
         </span>
       </div>
-      <span class="badge" :title="storageHint">🔒 {{ storageLabel }}</span>
+      <span
+        class="badge"
+        data-testid="connection-badge"
+        :title="connectionHint"
+      >
+        {{ connectionLabel }}
+      </span>
     </div>
   </header>
 
   <main class="layout">
-    <PostComposer @submit="handleSubmit" />
+    <PostComposer
+      ref="composerRef"
+      :max-length="MAX_LENGTH"
+      :submitting="store.submitting"
+      @submit="handleSubmit"
+    />
+
+    <div
+      v-if="store.error"
+      class="notice notice--error"
+      role="alert"
+      data-testid="error-banner"
+    >
+      <span class="notice__text">{{ store.error }}</span>
+      <span class="notice__actions">
+        <button
+          v-if="canRetry"
+          class="notice__action"
+          type="button"
+          data-testid="retry-btn"
+          @click="retry"
+        >
+          重试
+        </button>
+        <button
+          class="notice__action"
+          type="button"
+          data-testid="dismiss-error-btn"
+          @click="store.clearError()"
+        >
+          知道了
+        </button>
+      </span>
+    </div>
 
     <section class="stream" aria-labelledby="stream-title">
       <div class="stream__head">
@@ -50,21 +108,38 @@ function handleDelete(id) {
         <span class="stream__meta" data-testid="stream-count">{{ countLabel }}</span>
       </div>
 
-      <TransitionGroup v-if="!store.isEmpty" tag="ul" name="feed" class="feed">
+      <p
+        v-if="store.loading && store.isEmpty"
+        class="notice"
+        role="status"
+        aria-live="polite"
+        data-testid="loading-state"
+      >
+        正在加载信息流…
+      </p>
+
+      <TransitionGroup
+        v-else-if="!store.isEmpty"
+        id="feed"
+        tag="ul"
+        name="feed"
+        class="feed"
+      >
         <PostItem
           v-for="post in store.posts"
           :key="post.id"
           :post="post"
+          :deleting="store.isDeleting(post.id)"
           @delete="handleDelete"
         />
       </TransitionGroup>
 
-      <EmptyState v-else />
+      <EmptyState v-else-if="!store.error" />
     </section>
   </main>
 
   <footer class="footer">
-    <p>数据保存在浏览器 Local Storage，清除浏览器数据即会丢失。</p>
+    <p>内容保存在服务端内存中，服务重启后会清空。</p>
   </footer>
 </template>
 
@@ -166,6 +241,54 @@ function handleDelete(id) {
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   white-space: nowrap;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-2);
+  margin-top: var(--gap-3);
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.notice--error {
+  color: #ffd9d9;
+  background: rgba(255, 107, 107, 0.12);
+  border-color: rgba(255, 107, 107, 0.4);
+}
+
+.notice__text {
+  min-width: 0;
+}
+
+.notice__actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.notice__action {
+  flex: none;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+
+.notice__action:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .stream {

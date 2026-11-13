@@ -1,18 +1,24 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { MAX_LENGTH } from '../../shared/limits.js'
 
 const props = defineProps({
-  maxLength: { type: Number, default: 280 }
+  maxLength: { type: Number, default: MAX_LENGTH },
+  submitting: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['submit'])
 
 const text = ref('')
 const composing = ref(false)
+const inputRef = ref(null)
 
 const length = computed(() => text.value.length)
 const canSubmit = computed(
-  () => text.value.trim().length > 0 && length.value <= props.maxLength
+  () =>
+    !props.submitting &&
+    text.value.trim().length > 0 &&
+    length.value <= props.maxLength
 )
 
 const counterClass = computed(() => ({
@@ -24,9 +30,22 @@ const counterClass = computed(() => ({
 function submit() {
   if (!canSubmit.value) return
 
-  emit('submit', text.value.trim())
+  const value = text.value.trim()
   text.value = ''
+  emit('submit', value)
 }
+
+// 发布失败时由父组件把草稿放回输入框，避免用户重新输入。
+// 用户已经开始写新内容时不能覆盖，否则会静默丢失输入。
+function restoreDraft(value) {
+  if (typeof value !== 'string' || !value.trim()) return
+  if (text.value.trim()) return
+
+  text.value = value
+  inputRef.value?.focus?.()
+}
+
+defineExpose({ restoreDraft })
 
 function onKeydown(event) {
   if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return
@@ -45,6 +64,7 @@ function onKeydown(event) {
       <label class="sr-only" for="post-input">输入内容</label>
       <textarea
         id="post-input"
+        ref="inputRef"
         v-model="text"
         data-testid="post-input"
         class="composer__input"
@@ -74,7 +94,7 @@ function onKeydown(event) {
             :disabled="!canSubmit"
             @click.prevent="submit"
           >
-            发布
+            {{ submitting ? '发布中…' : '发布' }}
           </button>
         </div>
       </div>
